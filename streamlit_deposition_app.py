@@ -21,8 +21,8 @@ import streamlit as st
 import hmac
 
 # ========== 密码验证 ==========
-def check_password():
-    """返回 True 表示用户已通过验证"""
+# def check_password():
+#     """返回 True 表示用户已通过验证"""
     
     def login_form():
         with st.form("credentials"):
