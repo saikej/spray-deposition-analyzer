@@ -19,6 +19,7 @@ except Exception:
 
 # 这一行必须放在所有 Streamlit 界面代码之前
 st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
+st.write("BUILD: 2026-04-18-01")
 
 
 # ========== 密码验证 ==========
