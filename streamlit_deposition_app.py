@@ -17,49 +17,40 @@ except Exception:
 
 
 
-import streamlit as st
 import hmac
 
 # ========== 密码验证 ==========
 def check_password():
     """返回 True 表示用户已通过验证"""
-    
-    def login_form():
-        with st.form("credentials"):
-            st.text_input("用户名", key="username")
-            st.text_input("密码", type="password", key="password")
-            st.form_submit_button("登录", on_click=password_entered)
 
-    def password_entered():
-        """检查密码是否正确"""
-        # 从 secrets 中读取用户名和密码
-        if st.secrets["general"]["username"] == st.session_state["username"]:
-            if hmac.compare_digest(
-                st.session_state["password"],
-                st.secrets["general"]["password"]
-            ):
-                st.session_state["password_correct"] = True
-                del st.session_state["password"]
-                del st.session_state["username"]
-            else:
-                st.session_state["password_correct"] = False
-        else:
-            st.session_state["password_correct"] = False
-
-    # 初始化状态
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-
-    # 显示登录表单或返回验证状态
-    if not st.session_state["password_correct"]:
-        login_form()
-        return False
-    else:
+    if st.session_state.get("password_correct", False):
         return True
 
-# 验证通过后才运行主程序
-# if not check_password():
-#     st.stop()
+    try:
+        saved_username = st.secrets["USERNAME"]
+        saved_password = st.secrets["PASSWORD"]
+    except Exception:
+        st.error("未在 Streamlit Cloud Secrets 中配置 USERNAME 和 PASSWORD。")
+        st.code('USERNAME = "admin"\nPASSWORD = "123456"')
+        return False
+
+    with st.form("credentials"):
+        username = st.text_input("用户名")
+        password = st.text_input("密码", type="password")
+        submitted = st.form_submit_button("登录")
+
+    if submitted:
+        if username == saved_username and hmac.compare_digest(password, saved_password):
+            st.session_state["password_correct"] = True
+            return True
+        else:
+            st.error("用户名或密码错误")
+
+    return False
+
+
+if not check_password():
+    st.stop()
 
 
 
