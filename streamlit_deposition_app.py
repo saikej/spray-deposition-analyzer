@@ -1,5 +1,6 @@
 import io
 import math
+import hmac
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -16,8 +17,9 @@ except Exception:
     HAS_CANVAS = False
 
 
+# 这一行必须放在所有 Streamlit 界面代码之前
+st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
 
-import hmac
 
 # ========== 密码验证 ==========
 def check_password():
@@ -35,6 +37,7 @@ def check_password():
         return False
 
     with st.form("credentials"):
+        st.subheader("用户登录")
         username = st.text_input("用户名")
         password = st.text_input("密码", type="password")
         submitted = st.form_submit_button("登录")
@@ -42,7 +45,7 @@ def check_password():
     if submitted:
         if username == saved_username and hmac.compare_digest(password, saved_password):
             st.session_state["password_correct"] = True
-            return True
+            st.rerun()
         else:
             st.error("用户名或密码错误")
 
@@ -51,8 +54,6 @@ def check_password():
 
 if not check_password():
     st.stop()
-
-
 
 
 A4_PORTRAIT_MM = (210.0, 297.0)
@@ -752,7 +753,7 @@ def rectangles_from_canvas(json_data, scale_x: float, scale_y: float) -> List[RO
 
 
 def app():
-    st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
+    # st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
     st.title("蓝色背景纸多贴纸喷雾沉积分析")
     st.caption("先识别蓝色背景纸，再在背景纸内部分割浅色长方形贴纸并自动编号；同时支持手动补框。")
 
