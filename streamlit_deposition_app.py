@@ -17,13 +17,14 @@ except Exception:
     HAS_CANVAS = False
 
 
-# 这一行必须放在所有 Streamlit 界面代码之前
 st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
-st.write("BUILD: 2026-04-18-01")
+
+A4_PORTRAIT_MM = (210.0, 297.0)
+A4_LANDSCAPE_MM = (297.0, 210.0)
 
 
-# ========== 密码验证 ==========
-def check_password():
+# ========== 登录验证 ==========
+def check_password() -> bool:
     """返回 True 表示用户已通过验证"""
 
     if st.session_state.get("password_correct", False):
@@ -55,10 +56,6 @@ def check_password():
 
 if not check_password():
     st.stop()
-
-
-A4_PORTRAIT_MM = (210.0, 297.0)
-A4_LANDSCAPE_MM = (297.0, 210.0)
 
 
 @dataclass
@@ -93,7 +90,6 @@ class AnalysisParams:
     high_coverage_warning_pct: float
 
 
-
 def bgr_to_rgb(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -103,7 +99,13 @@ def read_image(uploaded_file) -> np.ndarray:
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
-def crop_by_percent(img: np.ndarray, left_pct: float, right_pct: float, top_pct: float, bottom_pct: float) -> np.ndarray:
+def crop_by_percent(
+    img: np.ndarray,
+    left_pct: float,
+    right_pct: float,
+    top_pct: float,
+    bottom_pct: float,
+) -> np.ndarray:
     h, w = img.shape[:2]
     x0 = int(w * left_pct / 100.0)
     x1 = int(w * (1.0 - right_pct / 100.0))
@@ -158,7 +160,11 @@ def contour_to_box(contour: np.ndarray) -> Tuple[np.ndarray, float, float]:
     return box, float(w), float(h)
 
 
-def detect_colored_board(img_bgr: np.ndarray, hue_tol: int = 14, sat_min: int = 35) -> Tuple[np.ndarray, Tuple[int, int, int, int], int]:
+def detect_colored_board(
+    img_bgr: np.ndarray,
+    hue_tol: int = 14,
+    sat_min: int = 35
+) -> Tuple[np.ndarray, Tuple[int, int, int, int], int]:
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     H, S, V = cv2.split(hsv)
 
@@ -190,12 +196,12 @@ def detect_colored_board(img_bgr: np.ndarray, hue_tol: int = 14, sat_min: int = 
     return img_bgr[y:y + h, x:x + w].copy(), (x, y, w, h), hue_peak
 
 
-def build_board_masks_from_hue(board_bgr: np.ndarray, hue_peak: int, hue_tol: int, sat_min: int) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    根据背景纸主色相，在背景纸区域内重新生成：
-    1) blue_mask：蓝色区域掩膜
-    2) paper_mask：最大蓝色连通域，即背景纸掩膜
-    """
+def build_board_masks_from_hue(
+    board_bgr: np.ndarray,
+    hue_peak: int,
+    hue_tol: int,
+    sat_min: int
+) -> Tuple[np.ndarray, np.ndarray]:
     hsv = cv2.cvtColor(board_bgr, cv2.COLOR_BGR2HSV)
     H, S, V = cv2.split(hsv)
 
@@ -232,12 +238,6 @@ def detect_stickers_binarized(
     aspect_min: float,
     aspect_max: float,
 ) -> Tuple[List[ROIItem], np.ndarray, np.ndarray]:
-    """
-    改进版贴纸检测：
-    1. 根据背景纸主色相提取蓝色背景纸
-    2. 在背景纸内部寻找“非蓝色 + 亮色”区域作为贴纸候选
-    3. 用面积、矩形度、长宽比过滤掉手写字、箭头、杂点
-    """
     hsv = cv2.cvtColor(board_bgr, cv2.COLOR_BGR2HSV)
     V = hsv[:, :, 2]
 
@@ -246,7 +246,6 @@ def detect_stickers_binarized(
     )
 
     non_blue_mask = cv2.bitwise_and(cv2.bitwise_not(blue_mask), paper_mask)
-
     bright_mask = (V >= int(value_threshold)).astype(np.uint8) * 255
     mask = cv2.bitwise_and(non_blue_mask, bright_mask)
 
@@ -404,7 +403,7 @@ def separate_touching_spots(binary_mask: np.ndarray) -> np.ndarray:
     kernel = np.ones((3, 3), np.uint8)
     sure_bg = cv2.dilate(mask_u8, kernel, iterations=1)
     unknown = cv2.subtract(sure_bg, sure_fg)
-    num_markers, markers = cv2.connectedComponents(sure_fg)
+    _, markers = cv2.connectedComponents(sure_fg)
     markers = markers + 1
     markers[unknown == 255] = 0
     color = cv2.cvtColor(mask_u8, cv2.COLOR_GRAY2BGR)
@@ -414,22 +413,34 @@ def separate_touching_spots(binary_mask: np.ndarray) -> np.ndarray:
     return out
 
 
-def segment_deposition(roi_bgr: np.ndarray, threshold_override: Optional[float], min_spot_area_px: int, use_watershed: bool) -> Tuple[np.ndarray, float]:
+def segment_deposition(
+    roi_bgr: np.ndarray,
+    threshold_override: Optional[float],
+    min_spot_area_px: int,
+    use_watershed: bool
+) -> Tuple[np.ndarray, float]:
+    if roi_bgr is None or roi_bgr.size == 0:
+        return np.zeros((1, 1), dtype=np.uint8), 0.0
+
     paper_lab = estimate_paper_lab(roi_bgr)
     dist = lab_distance_to_color(roi_bgr, paper_lab)
     threshold = threshold_override if threshold_override is not None else otsu_threshold_from_float(dist)
     mask = (dist > threshold).astype(np.uint8) * 255
+
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
     if use_watershed:
         mask = separate_touching_spots(mask)
+
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     clean = np.zeros_like(mask)
     for lab_idx in range(1, num_labels):
         area = stats[lab_idx, cv2.CC_STAT_AREA]
         if area >= min_spot_area_px:
             clean[labels == lab_idx] = 255
+
     return clean, float(threshold)
 
 
@@ -446,7 +457,15 @@ def weighted_percentile(values: np.ndarray, weights: np.ndarray, percentile: flo
     return float(values[idx])
 
 
-def correct_diameter(stain_diameter_um: np.ndarray, stain_area_um2: np.ndarray, model: str, power_a: float, power_b: float, area_a: float, area_b: float) -> np.ndarray:
+def correct_diameter(
+    stain_diameter_um: np.ndarray,
+    stain_area_um2: np.ndarray,
+    model: str,
+    power_a: float,
+    power_b: float,
+    area_a: float,
+    area_b: float,
+) -> np.ndarray:
     if model == "不校正（直接使用雾滴等效直径）":
         return stain_diameter_um.copy()
     if model == "幂函数：d = a * stain_d^b":
@@ -471,7 +490,9 @@ def compute_roi_metrics(roi_bgr: np.ndarray, dep_mask: np.ndarray, params: Analy
         "ROI_area_mm2": roi_area_mm2,
         "Deposit_area_mm2": dep_area_mm2,
         "Coverage_pct": coverage_pct,
-        "Coverage_flag": "高覆盖率，可能存在严重重叠" if coverage_pct >= params.high_coverage_warning_pct else "正常",
+        "Coverage_flag": "高覆盖率，可能存在严重重叠"
+        if coverage_pct >= params.high_coverage_warning_pct
+        else "正常",
     }
 
     if params.droplet_mode == "仅覆盖率/染色面积":
@@ -545,9 +566,9 @@ def compute_roi_metrics(roi_bgr: np.ndarray, dep_mask: np.ndarray, params: Analy
 def create_detection_overlay(img_bgr: np.ndarray, rois: List[ROIItem], color=(0, 180, 0)) -> np.ndarray:
     overlay = img_bgr.copy()
 
-    font_scale = 1.5          # 编号字体大小
-    font_thickness = 4        # 编号线宽
-    poly_thickness = 5        # 检测框线宽
+    font_scale = 1.5
+    font_thickness = 4
+    poly_thickness = 5
     text_pad_x = 12
     text_pad_y = 10
 
@@ -555,20 +576,14 @@ def create_detection_overlay(img_bgr: np.ndarray, rois: List[ROIItem], color=(0,
         pts = roi.box.astype(np.int32)
         cv2.polylines(overlay, [pts], True, color, poly_thickness)
 
-        # 这里只显示“序号”，不再显示 R1C1 之类标签
         label_text = f"{idx}"
-
         (tw, th), baseline = cv2.getTextSize(
-            label_text,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            font_thickness
+            label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
         )
 
         anchor_x = int(np.min(pts[:, 0]))
         anchor_y = int(np.min(pts[:, 1]))
 
-        # 默认把编号框放在目标左上角上方；若越界则放到框内上沿
         box_x0 = max(0, anchor_x)
         box_y1 = anchor_y - 6
         box_y0 = box_y1 - th - baseline - 2 * text_pad_y
@@ -593,7 +608,7 @@ def create_detection_overlay(img_bgr: np.ndarray, rois: List[ROIItem], color=(0,
             font_scale,
             color,
             font_thickness,
-            cv2.LINE_AA
+            cv2.LINE_AA,
         )
 
     return overlay
@@ -704,7 +719,11 @@ def render_selected_panel(df: pd.DataFrame, preview_data: List[Tuple[str, np.nda
         with q2:
             st.image(roi_mask, caption=f"{row['Label']} - 沉积掩膜")
 
-    summary_cols = [c for c in ["Index", "Label", "Source", "Coverage_pct", "Spot_density_per_cm2", "DV0.5_um", "Spot_count"] if c in df.columns]
+    summary_cols = [
+        c for c in
+        ["Index", "Label", "Source", "Coverage_pct", "Spot_density_per_cm2", "DV0.5_um", "Spot_count"]
+        if c in df.columns
+    ]
     st.markdown("**全部区域摘要**")
     st.dataframe(df[summary_cols], height=min(360, 35 * (len(df) + 1)))
 
@@ -713,9 +732,11 @@ def rectangles_from_canvas(json_data, scale_x: float, scale_y: float) -> List[RO
     rois = []
     if not json_data or "objects" not in json_data:
         return rois
+
     for obj in json_data["objects"]:
         if obj.get("type") != "rect":
             continue
+
         left = float(obj.get("left", 0.0)) * scale_x
         top = float(obj.get("top", 0.0)) * scale_y
         width = float(obj.get("width", 0.0)) * float(obj.get("scaleX", 1.0)) * scale_x
@@ -723,6 +744,7 @@ def rectangles_from_canvas(json_data, scale_x: float, scale_y: float) -> List[RO
         angle = math.radians(float(obj.get("angle", 0.0)))
         cx = left + width / 2.0
         cy = top + height / 2.0
+
         pts = np.array(
             [
                 [-width / 2.0, -height / 2.0],
@@ -732,14 +754,17 @@ def rectangles_from_canvas(json_data, scale_x: float, scale_y: float) -> List[RO
             ],
             dtype=np.float32,
         )
+
         if abs(angle) > 1e-6:
             rot = np.array(
                 [[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]],
-                dtype=np.float32
+                dtype=np.float32,
             )
             pts = pts @ rot.T
+
         pts[:, 0] += cx
         pts[:, 1] += cy
+
         rois.append(
             ROIItem(
                 box=order_quad_points(pts),
@@ -842,23 +867,36 @@ def app():
 
     st.subheader("手动框选补充区域")
     manual_rois: List[ROIItem] = []
+
     if HAS_CANVAS:
         display_width = min(900, board_bgr.shape[1])
         scale = display_width / board_bgr.shape[1]
         display_height = int(board_bgr.shape[0] * scale)
+
         st.caption("可直接在下图拖动矩形，补充漏检贴纸，或只分析贴纸内部任意子区域。")
-        canvas_result = st_canvas(
-            fill_color="rgba(0, 255, 0, 0.05)",
-            stroke_width=2,
-            stroke_color="#00AA00",
-            background_image=Image.fromarray(bgr_to_rgb(board_bgr)),
-            update_streamlit=True,
-            height=display_height,
-            width=display_width,
-            drawing_mode="rect",
-            key="manual_canvas_rect",
+
+        display_img = cv2.resize(
+            bgr_to_rgb(board_bgr),
+            (display_width, display_height),
+            interpolation=cv2.INTER_AREA,
         )
-        manual_rois = rectangles_from_canvas(canvas_result.json_data, 1.0 / scale, 1.0 / scale)
+
+        try:
+            canvas_result = st_canvas(
+                fill_color="rgba(0, 255, 0, 0.05)",
+                stroke_width=2,
+                stroke_color="#00AA00",
+                background_image=Image.fromarray(display_img),
+                update_streamlit=True,
+                height=display_height,
+                width=display_width,
+                drawing_mode="rect",
+                key="manual_canvas_rect",
+            )
+            manual_rois = rectangles_from_canvas(canvas_result.json_data, 1.0 / scale, 1.0 / scale)
+        except Exception as e:
+            st.warning(f"手动画框模块加载失败，已自动跳过：{e}")
+            manual_rois = []
     else:
         st.info("当前环境缺少 streamlit-drawable-canvas，暂时无法直接画框。可安装：pip install streamlit-drawable-canvas")
 
@@ -883,33 +921,47 @@ def app():
 
     analysis_rows = []
     preview_data = []
+    valid_rois = []
+
     for roi in rois_all:
-        warped = warp_roi(board_bgr, roi.box) if roi.source == "auto" else warp_roi(board_bgr, roi.box, pad_px=0)
-        inner = crop_inner_margin(warped, inner_margin_pct if roi.source == "auto" else 0.0)
-        roi.roi_image = inner
+        try:
+            warped = warp_roi(board_bgr, roi.box) if roi.source == "auto" else warp_roi(board_bgr, roi.box, pad_px=0)
+            inner = crop_inner_margin(warped, inner_margin_pct if roi.source == "auto" else 0.0)
 
-        dep_mask, dep_thr = segment_deposition(
-            inner,
-            analysis_params.deposition_thresh,
-            min_spot_area_px,
-            use_watershed
-        )
-        roi.roi_mask = dep_mask
+            if inner is None or inner.size == 0 or inner.shape[0] < 5 or inner.shape[1] < 5:
+                st.warning(f"区域 {roi.label} 裁剪结果为空或过小，已跳过。")
+                continue
 
-        metrics = compute_roi_metrics(inner, dep_mask, analysis_params)
-        metrics["Used_board_hue_peak"] = hue_peak
-        metrics["Used_sticker_value_threshold"] = value_threshold
-        metrics["Used_deposition_threshold"] = dep_thr
-        analysis_rows.append(metrics)
-        preview_data.append((roi.label, inner, dep_mask))
+            roi.roi_image = inner
 
+            dep_mask, dep_thr = segment_deposition(
+                inner,
+                analysis_params.deposition_thresh,
+                min_spot_area_px,
+                use_watershed,
+            )
+            roi.roi_mask = dep_mask
+
+            metrics = compute_roi_metrics(inner, dep_mask, analysis_params)
+            metrics["Used_board_hue_peak"] = hue_peak
+            metrics["Used_sticker_value_threshold"] = value_threshold
+            metrics["Used_deposition_threshold"] = dep_thr
+
+            valid_rois.append(roi)
+            analysis_rows.append(metrics)
+            preview_data.append((roi.label, inner, dep_mask))
+
+        except Exception as e:
+            st.warning(f"区域 {roi.label} 分析失败，已跳过：{e}")
+
+    rois_all = valid_rois
     df = build_results_table(rois_all, analysis_rows)
     result_overlay = create_result_overlay(board_bgr, rois_all, df)
 
     st.subheader("检测框与指标")
     left, right = st.columns([1.55, 1.0])
     with left:
-        st.image(bgr_to_rgb(detection_overlay), caption="绿色框 + 序号 + 标签")
+        st.image(bgr_to_rgb(detection_overlay), caption="绿色框 + 序号")
         st.image(bgr_to_rgb(result_overlay), caption="覆盖率结果标注")
     with right:
         st.metric("总区域数", len(rois_all))
@@ -930,7 +982,7 @@ def app():
         "下载 Excel",
         excel_bytes,
         file_name="deposition_results.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     d3.download_button("下载结果标注图", overlay_bytes, file_name="deposition_overlay.png", mime="image/png")
 
@@ -946,4 +998,11 @@ def app():
 
 
 if __name__ == "__main__":
-    app()
+    try:
+        app()
+    except Exception as e:
+        import traceback
+        st.error("程序运行出错：")
+        st.exception(e)
+        st.code(traceback.format_exc())
+        raise
