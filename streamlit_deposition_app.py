@@ -753,7 +753,6 @@ def rectangles_from_canvas(json_data, scale_x: float, scale_y: float) -> List[RO
 
 
 def app():
-    # st.set_page_config(page_title="蓝底贴纸喷雾沉积分析", layout="wide")
     st.title("蓝色背景纸多贴纸喷雾沉积分析")
     st.caption("先识别蓝色背景纸，再在背景纸内部分割浅色长方形贴纸并自动编号；同时支持手动补框。")
 
